@@ -1,0 +1,7 @@
+# ui_theme.py
+APP_FONT = "Segoe UI"
+
+FONT_SMALL  = (APP_FONT, 10)
+FONT_NORMAL = (APP_FONT, 11)
+FONT_BIG    = (APP_FONT, 13)
+FONT_TITLE  = (APP_FONT, 15, "bold")
