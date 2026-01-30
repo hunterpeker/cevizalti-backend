@@ -28,6 +28,27 @@ FONT_TITLE  = ui_theme.FONT_TITLE
 import win32ui
 import requests
 import socket
+import requests
+import shutil
+import sys
+
+APP_VERSION = "1.0.0"
+
+GITHUB_REPO = "hunterpeker/cevizalti-backend"
+GITHUB_BRANCH = "main"
+
+GITHUB_RAW_BASE = (
+    f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
+)
+
+GUNCELLENECEK_DOSYALAR = [
+    "app.py",
+    "data.py",
+    "pdf_excel.py",
+    "reports.py",
+    "stok_app.py",
+    "ui_theme.py",
+]
 
 SERVER_URL = "http://192.168.0.50:5000"
 print("SERVER_URL:", SERVER_URL)
@@ -306,6 +327,113 @@ def fis_yazdir(masa, urunler, toplam, odeme, kullanici):
 
 def hashle(s):
     return hashlib.sha256(s.encode()).hexdigest()
+
+from tkinter import messagebox
+
+def sistem_guncelle_onay():
+    cevap = messagebox.askyesno(
+        "Sistem Güncelleme",
+        "⚠️ DİKKAT!\n\n"
+        "Bu işlem sistem dosyalarını günceller.\n"
+        "Yanlış veya yarım bir güncelleme\n"
+        "programın çalışmamasına neden olabilir.\n\n"
+        "Devam etmek istiyor musunuz?"
+    )
+
+    if not cevap:
+        return  # ❌ Kullanıcı vazgeçti
+
+    # ✅ Kullanıcı onayladı → asıl kontrol çalışsın
+    github_surum_kontrol()
+
+def github_surum_kontrol():
+    try:
+        url = "https://raw.githubusercontent.com/hunterpeker/cevizalti-backend/main/version.json"
+        r = requests.get(url, timeout=5)
+        if r.status_code != 200:
+            return None
+
+        data = r.json()
+        return data
+
+    except Exception:
+        return None
+# 🔼 BURAYA KADAR
+
+def guncelleme_baslat():
+    github_data = github_surum_kontrol()
+
+    if not github_data:
+        messagebox.showerror(
+            "Güncelleme Kontrolü",
+            "GitHub'a bağlanılamadı.\nİnternet bağlantısını kontrol edin."
+        )
+        return
+
+    remote_version = github_data.get("version", "bilinmiyor")
+    remote_date = github_data.get("date", "")
+    remote_desc = github_data.get("desc", "")
+
+    if remote_version == APP_VERSION:
+        messagebox.showinfo(
+            "Sistem Güncel",
+            f"Sürüm: {APP_VERSION}\n\nProgram zaten güncel."
+        )
+        return
+
+    # 🔴 ONAY EKRANI (KRİTİK KISIM)
+    onay = messagebox.askyesno(
+        "⚠️ Yeni Güncelleme Var",
+        f"Mevcut Sürüm : {APP_VERSION}\n"
+        f"Yeni Sürüm   : {remote_version}\n\n"
+        f"Tarih: {remote_date}\n"
+        f"Açıklama:\n{remote_desc}\n\n"
+        "Güncelleme yapılmadan önce\n"
+        "yedek alındığından emin olun.\n\n"
+        "Güncellemeye devam edilsin mi?"
+    )
+
+    if not onay:
+        return
+
+    # ✅ ONAYDAN SONRA GERÇEK GÜNCELLEME
+    gercek_guncelleme_baslat(github_data)
+
+
+def gercek_guncelleme_baslat(github_data):
+    try:
+        # 1️⃣ YEDEK
+        yedek_al()
+
+        # 2️⃣ DOSYALARI İNDİR
+        for dosya in GUNCELLENECEK_DOSYALAR:
+            url = f"{GITHUB_RAW_BASE}/{dosya}"
+            hedef = os.path.join(os.getcwd(), dosya)
+
+            r = requests.get(url, timeout=10)
+            if r.status_code != 200:
+                raise Exception(f"{dosya} indirilemedi")
+
+            with open(hedef, "wb") as f:
+                f.write(r.content)
+
+        messagebox.showinfo(
+            "Güncelleme Tamamlandı",
+            "Güncelleme başarıyla yapıldı.\n\n"
+            "Program şimdi yeniden başlatılacak."
+        )
+
+        # 3️⃣ PROGRAMI YENİDEN BAŞLAT
+        python = sys.executable
+        os.execl(python, python, *sys.argv)
+
+    except Exception as e:
+        messagebox.showerror(
+            "Güncelleme Hatası",
+            f"Güncelleme sırasında hata oluştu:\n\n{e}"
+        )
+
+
 
 def backend_siparis_gonder(masa, menu_id, adet):
     payload = {
@@ -3176,6 +3304,15 @@ def ana_ekran():
             command=kullanici_yonetimi
         )
 
+        admin.add_separator()
+
+        admin.add_command(
+            label="🔄 Sistem Güncelleme",
+            command=guncelleme_baslat
+        )
+
+
+
     # ===== YEDEKLEME =====
         yedek_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="💾 Yedekleme", menu=yedek_menu)
@@ -3249,7 +3386,6 @@ def program_kapanirken():
     root.destroy()
 
     # 🔔 Kritik stok uyarısı
-
 
 def kritik_kontrol():
     kritikler = [
