@@ -3,6 +3,15 @@ from data import yukle, kaydet
 from reports import (rapor_ekrani,satis_raporu,stok_raporu,kullanici_raporu,odeme_raporu)
 from reports import urun_satis_adet_raporu, satin_alma_fiyat_raporu
 from reports import kar_zarar_yeni
+from services.backend_client import (
+    siparis_gonder,
+    adisyonlari_yukle,
+    masa_kapat as backend_masa_kapat,
+    siparis_iptal,
+    masa_tasi,
+    gelirleri_al
+)
+from core.update_service import dosya_indir, github_version_bilgisi_al
 from tkinter import filedialog
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -18,7 +27,6 @@ import hashlib
 from datetime import datetime
 import shutil
 from pystray import Icon, Menu, MenuItem
-from PIL import Image
 import win32print
 import ui_theme
 FONT_SMALL  = ui_theme.FONT_SMALL
@@ -26,10 +34,7 @@ FONT_NORMAL = ui_theme.FONT_NORMAL
 FONT_BIG    = ui_theme.FONT_BIG
 FONT_TITLE  = ui_theme.FONT_TITLE
 import win32ui
-import requests
 import socket
-import requests
-import shutil
 import sys
 
 APP_VERSION = "1.0.0"
@@ -49,10 +54,6 @@ GUNCELLENECEK_DOSYALAR = [
     "stok_app.py",
     "ui_theme.py",
 ]
-
-SERVER_URL = "http://192.168.0.50:5000"
-print("SERVER_URL:", SERVER_URL)
-
 toplam_tutar = 0.0
 indirim_orani = 0.0
 indirimli_toplam = 0.0
@@ -187,8 +188,6 @@ def pdf_kaydet_dialog(gecici_pdf, masa):
     return True
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 import tempfile
 import os
 from datetime import datetime
@@ -335,33 +334,16 @@ def sistem_guncelle_onay():
         "Sistem Güncelleme",
         "⚠️ DİKKAT!\n\n"
         "Bu işlem sistem dosyalarını günceller.\n"
-        "Yanlış veya yarım bir güncelleme\n"
-        "programın çalışmamasına neden olabilir.\n\n"
         "Devam etmek istiyor musunuz?"
     )
 
     if not cevap:
-        return  # ❌ Kullanıcı vazgeçti
+        return
 
-    # ✅ Kullanıcı onayladı → asıl kontrol çalışsın
-    github_surum_kontrol()
-
-def github_surum_kontrol():
-    try:
-        url = "https://raw.githubusercontent.com/hunterpeker/cevizalti-backend/main/version.json"
-        r = requests.get(url, timeout=5)
-        if r.status_code != 200:
-            return None
-
-        data = r.json()
-        return data
-
-    except Exception:
-        return None
-# 🔼 BURAYA KADAR
+    guncelleme_baslat()
 
 def guncelleme_baslat():
-    github_data = github_surum_kontrol()
+    github_data = github_version_bilgisi_al()
 
     if not github_data:
         messagebox.showerror(
@@ -410,12 +392,10 @@ def gercek_guncelleme_baslat(github_data):
             url = f"{GITHUB_RAW_BASE}/{dosya}"
             hedef = os.path.join(os.getcwd(), dosya)
 
-            r = requests.get(url, timeout=10)
-            if r.status_code != 200:
-                raise Exception(f"{dosya} indirilemedi")
+            icerik = dosya_indir(url, dosya)
 
             with open(hedef, "wb") as f:
-                f.write(r.content)
+                f.write(icerik)
 
         messagebox.showinfo(
             "Güncelleme Tamamlandı",
@@ -433,41 +413,6 @@ def gercek_guncelleme_baslat(github_data):
             f"Güncelleme sırasında hata oluştu:\n\n{e}"
         )
 
-
-
-def backend_siparis_gonder(masa, menu_id, adet):
-    payload = {
-        "masa": masa,
-        "kullanici": aktif_kullanici,
-        "urunler": [
-            {
-                "menu_id": int(menu_id),
-                "adet": int(adet)
-            }
-        ]
-    }
-
-    try:
-        r = requests.post(
-            f"{SERVER_URL}/siparis",
-            json=payload,
-            timeout=3
-        )
-        if r.status_code != 200:
-            messagebox.showerror("Sipariş Hatası", r.text)
-    except Exception as e:
-        messagebox.showerror("Bağlantı Hatası", str(e))
-
-def adisyonlari_yukle():
-    try:
-        r = requests.get(f"{SERVER_URL}/adisyonlar", timeout=3)
-        return r.json()
-    except Exception as e:
-        messagebox.showerror(
-            "Bağlantı Hatası",
-            f"Backend erişilemiyor:\n{e}"
-        )
-        return {}
 
 def turkce_key(s):
     if not isinstance(s, str):
@@ -1128,19 +1073,7 @@ def adisyon_ekrani():
             if not hedef.get():
                 return
 
-            try:
-                requests.post(
-                    f"{SERVER_URL}/masa_tasi",
-                    json={
-                        "eski_masa": eski_masa,
-                        "yeni_masa": hedef.get(),
-                        "kullanici": aktif_kullanici
-                    },
-                    timeout=3
-                )
-            except Exception as e:
-                messagebox.showerror("Hata", str(e))
-                return
+            masa_tasi(eski_masa, hedef.get(), aktif_kullanici)
 
             p.destroy()
 
@@ -1249,20 +1182,7 @@ def adisyon_ekrani():
             return
 
         # === BACKEND'E İPTAL BİLDİR ===
-        try:
-            requests.post(
-                f"{SERVER_URL}/siparis_iptal",
-                json={
-                    "masa": masa,
-                    "menu_id": int(menu_id),
-                    "adet": adet,
-                    "kullanici": aktif_kullanici
-                },
-                timeout=3
-            )
-        except Exception as e:
-            messagebox.showerror("Hata", str(e))
-            return
+        siparis_iptal(masa, menu_id, adet, aktif_kullanici)
 
         # === STOK GERİ EKLE (REÇETEYE GÖRE) ===
         menu = menuler.get(menu_id)
@@ -1416,7 +1336,7 @@ def adisyon_ekrani():
         if not recete_stok_kontrol_ve_dus(mid, a):
             return
 
-        backend_siparis_gonder(masa, mid, a)
+        siparis_gonder(masa, mid, a, aktif_kullanici)
 
         # 🔥 ADİSYONLARI TEKRAR YÜKLE
         adisyonlar.clear()
@@ -1426,24 +1346,13 @@ def adisyon_ekrani():
         masa_ac(masa)
 
     def masa_kapat(tur):
-        toplam = 0.0
         if baslik.cget("text") == "Adisyon Seçilmedi":
             return
 
         masa = baslik.cget("text").split("|")[0].replace(" Adisyonu", "").strip()
 
-        try:
-            requests.post(
-                f"{SERVER_URL}/masa_kapat",
-                json={
-                    "masa": masa,
-                    "odeme": tur,
-                    "kullanici": aktif_kullanici
-                },
-                timeout=3
-            )
-        except:
-            pass
+        backend_masa_kapat(masa, tur, aktif_kullanici)
+
 
         # ===== YAZDIRMA TÜRÜ SEÇ =====
         yazdirma_turu = yazici_sec_dialog()
@@ -2967,12 +2876,7 @@ def ana_ekran():
             global gelirler, giderler
 
             # 🔥 BACKEND’DEN ANLIK GELİRLERİ ÇEK
-            try:
-                r = requests.get(f"{SERVER_URL}/gelirler", timeout=3)
-                gelirler = r.json()
-            except Exception as e:
-                messagebox.showerror("Hata", f"Gelirler alınamadı:\n{e}")
-                return
+            gelirler = gelirleri_al()
 
             # 🔥 GİDERLER HALA DOSYADAN
             giderler = yukle(DOSYA_GIDER, [])
